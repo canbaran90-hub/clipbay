@@ -98,7 +98,22 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
-// Async, non-blocking recursive walk. Enqueues media files as it finds them and
+// Does this file actually need (re)indexing? Skips files that are already done so
+// re-scans of huge libraries only do real work (no 14k-item queue / IPC flood).
+async function needsIndex(filePath) {
+  const existing = store.getItem(filePath);
+  if (!existing || !existing.assetsReady) return true;
+  if (!fs.existsSync(cachePathFor(filePath, 'thumb.jpg'))) return true; // missing preview
+  try {
+    const st = await fs.promises.stat(filePath);
+    if (st.mtimeMs !== existing.mtime) return true; // changed
+  } catch (e) {
+    return false; // unreadable -> leave as is
+  }
+  return false;
+}
+
+// Async, non-blocking recursive walk. Enqueues only files that need work and
 // yields to the event loop between directories so the UI never freezes.
 async function walkAndEnqueue(dir, folderId) {
   let entries;
@@ -113,7 +128,7 @@ async function walkAndEnqueue(dir, folderId) {
     if (e.isDirectory()) {
       await walkAndEnqueue(full, folderId);
     } else if (e.isFile() && typeForExt(path.extname(e.name))) {
-      enqueue(() => indexFile(full, folderId));
+      if (await needsIndex(full)) enqueue(() => indexFile(full, folderId));
     }
   }
 }
