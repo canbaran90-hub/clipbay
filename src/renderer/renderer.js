@@ -412,8 +412,12 @@ async function deleteSelected() {
 async function openInPremiere(it) {
   setBusy(true, 'Öffne in Premiere…');
   const r = await window.api.openInPremiere(it.path);
-  if (r && r.ok) setBusy(false, 'Im Premiere-Quellmonitor geöffnet.');
-  else setBusy(false, 'Premiere-Bridge nicht erreichbar – in Premiere: Fenster ▸ Erweiterungen ▸ „ClipBay Bridge" öffnen.');
+  if (r && r.ok) {
+    setBusy(false, 'Im Premiere-Quellmonitor geöffnet.');
+    window.api.hideWindow();   // get out of the way so you can edit in Premiere
+  } else {
+    setBusy(false, 'Premiere-Bridge nicht erreichbar – in Premiere: Fenster ▸ Erweiterungen ▸ „ClipBay Bridge" öffnen.');
+  }
 }
 
 grid.addEventListener('click', (e) => { if (e.target === grid || e.target === gridInner) clearSelection(); });
