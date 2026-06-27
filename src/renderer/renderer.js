@@ -115,6 +115,7 @@ function buildCard(it) {
 
   wireThumbInteraction(thumb, scrubLine, it);
   wireDrag(thumb, card, it);
+  thumb.addEventListener('dblclick', () => openViewer(it));
 
   // meta
   const meta = document.createElement('div');
@@ -236,11 +237,13 @@ function renderFolders() {
     name.textContent = f.path.split(/[\\/]/).filter(Boolean).pop() || f.path;
     name.title = f.path;
     const rm = document.createElement('button');
-    rm.className = 'remove'; rm.textContent = '×'; rm.title = 'Entfernen';
-    rm.addEventListener('click', async () => {
-      state.folders = await window.api.removeFolder(f.id);
-      for (const [p, it] of state.items) if (it.folderId === f.id) state.items.delete(p);
-      renderFolders(); render();
+    rm.className = 'remove'; rm.textContent = '🗑'; rm.title = 'Ordner aus ClipBay entfernen';
+    rm.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const ok = confirm(`Ordner aus ClipBay entfernen?\n\n${f.path}\n\nDeine Dateien auf der Festplatte bleiben unberührt.`);
+      if (!ok) return;
+      await window.api.removeFolder(f.id);
+      await reloadState();
     });
     li.appendChild(name); li.appendChild(rm);
     folderListEl.appendChild(li);
@@ -315,12 +318,241 @@ window.api.onFfmpegMissing(() => {
   document.getElementById('main').prepend(banner);
 });
 
-// ---------------- init ----------------
-(async function init() {
-  renderColorFilter();
+async function reloadState() {
   const st = await window.api.getState();
   state.folders = st.folders;
+  state.items = new Map();
   for (const it of st.items) state.items.set(it.path, it);
   renderFolders();
   render();
+}
+
+// ---------------- preview size slider ----------------
+const sizeSlider = document.getElementById('sizeSlider');
+function applyCardSize(px) {
+  grid.style.setProperty('--card-size', px + 'px');
+}
+sizeSlider.addEventListener('input', (e) => {
+  const px = parseInt(e.target.value, 10);
+  applyCardSize(px);
+  try { localStorage.setItem('clipbay.cardSize', String(px)); } catch (_) {}
+});
+(function initSize() {
+  let px = 220;
+  try { const saved = parseInt(localStorage.getItem('clipbay.cardSize'), 10); if (saved) px = saved; } catch (_) {}
+  sizeSlider.value = String(px);
+  applyCardSize(px);
+})();
+
+// ================= Detail / Preview viewer =================
+const overlay = document.getElementById('overlay');
+const vStage = document.getElementById('vStage');
+const vName = document.getElementById('vName');
+const vPlay = document.getElementById('vPlay');
+const vTimeEl = document.getElementById('vTime');
+const vTimeline = document.getElementById('vTimeline');
+const vPlayed = document.getElementById('vPlayed');
+const vPlayhead = document.getElementById('vPlayhead');
+const vRange = document.getElementById('vRange');
+const vMarkIn = document.getElementById('vMarkIn');
+const vMarkOut = document.getElementById('vMarkOut');
+const vIO = document.getElementById('vIO');
+const vSetIn = document.getElementById('vSetIn');
+const vSetOut = document.getElementById('vSetOut');
+const vClearIO = document.getElementById('vClearIO');
+const vDragFull = document.getElementById('vDragFull');
+const vMakeClip = document.getElementById('vMakeClip');
+const vDragClip = document.getElementById('vDragClip');
+
+const viewer = {
+  item: null,
+  mediaEl: null,   // <video> or <audio>
+  inPt: null,
+  outPt: null,
+  clipPath: null,  // path of last exported In–Out clip
+  fps: 30,
+};
+
+function invalidateClip() {
+  viewer.clipPath = null;
+  vDragClip.disabled = true;
+  vMakeClip.textContent = '✂ Ausschnitt erzeugen';
+}
+
+function fmtTime(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  const cs = Math.floor((sec % 1) * 100);
+  return `${m}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+}
+
+function openViewer(it) {
+  viewer.item = it;
+  viewer.inPt = null;
+  viewer.outPt = null;
+  vName.textContent = it.name;
+  vStage.innerHTML = '';
+  overlay.classList.remove('hidden');
+  invalidateClip();
+  updateIOUi();
+
+  if (it.type === 'image') {
+    const img = document.createElement('img');
+    img.src = it.src;
+    vStage.appendChild(img);
+    viewer.mediaEl = null;
+    setTransport(false);
+    return;
+  }
+
+  let el;
+  if (it.type === 'video') {
+    el = document.createElement('video');
+    el.src = it.src;
+    el.controls = false;
+    vStage.appendChild(el);
+  } else {
+    // audio: show big waveform image + invisible audio element
+    const wrap = document.createElement('div');
+    wrap.className = 'wave-big';
+    if (it.thumb) { const im = document.createElement('img'); im.src = it.thumb; wrap.appendChild(im); }
+    vStage.appendChild(wrap);
+    el = document.createElement('audio');
+    el.src = it.src;
+    vStage.appendChild(el);
+  }
+  viewer.mediaEl = el;
+  setTransport(true);
+
+  el.addEventListener('loadedmetadata', () => { updateTransport(); });
+  el.addEventListener('timeupdate', updateTransport);
+  el.addEventListener('play', () => { vPlay.textContent = '❚❚ Pause'; });
+  el.addEventListener('pause', () => { vPlay.textContent = '▶ Play'; });
+  el.play().catch(() => {});
+}
+
+function setTransport(enabled) {
+  [vPlay, vSetIn, vSetOut, vClearIO, vMakeClip].forEach((b) => { b.disabled = !enabled; });
+  vTimeline.style.opacity = enabled ? '1' : '0.3';
+}
+
+function closeViewer() {
+  if (viewer.mediaEl) { viewer.mediaEl.pause(); viewer.mediaEl.src = ''; }
+  viewer.mediaEl = null;
+  viewer.item = null;
+  vStage.innerHTML = '';
+  overlay.classList.add('hidden');
+}
+
+function updateTransport() {
+  const el = viewer.mediaEl;
+  if (!el || !el.duration || !isFinite(el.duration)) { return; }
+  const ratio = el.currentTime / el.duration;
+  vPlayed.style.width = `${ratio * 100}%`;
+  vPlayhead.style.left = `${ratio * 100}%`;
+  vTimeEl.textContent = `${fmtTime(el.currentTime)} / ${fmtTime(el.duration)}`;
+}
+
+function updateIOUi() {
+  const el = viewer.mediaEl;
+  const dur = el && el.duration && isFinite(el.duration) ? el.duration : (viewer.item ? viewer.item.duration : 0);
+  const hasIn = viewer.inPt != null, hasOut = viewer.outPt != null;
+  vMarkIn.style.display = hasIn ? 'block' : 'none';
+  vMarkOut.style.display = hasOut ? 'block' : 'none';
+  if (hasIn && dur) vMarkIn.style.left = `${(viewer.inPt / dur) * 100}%`;
+  if (hasOut && dur) vMarkOut.style.left = `${(viewer.outPt / dur) * 100}%`;
+  if (hasIn && hasOut && dur) {
+    vRange.style.display = 'block';
+    vRange.style.left = `${(viewer.inPt / dur) * 100}%`;
+    vRange.style.width = `${((viewer.outPt - viewer.inPt) / dur) * 100}%`;
+  } else {
+    vRange.style.display = 'none';
+  }
+  if (hasIn || hasOut) {
+    vIO.textContent = `In ${hasIn ? fmtTime(viewer.inPt) : '–'}  |  Out ${hasOut ? fmtTime(viewer.outPt) : '–'}`;
+  } else {
+    vIO.textContent = '';
+  }
+}
+
+function seekTo(sec) {
+  const el = viewer.mediaEl;
+  if (!el || !el.duration) return;
+  el.currentTime = Math.max(0, Math.min(el.duration, sec));
+  updateTransport();
+}
+
+vTimeline.addEventListener('click', (e) => {
+  const el = viewer.mediaEl;
+  if (!el || !el.duration) return;
+  const rect = vTimeline.getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  seekTo(ratio * el.duration);
+});
+
+vPlay.addEventListener('click', () => {
+  const el = viewer.mediaEl; if (!el) return;
+  if (el.paused) el.play().catch(() => {}); else el.pause();
+});
+function setIn() { const el = viewer.mediaEl; if (!el) return; viewer.inPt = el.currentTime; if (viewer.outPt != null && viewer.outPt <= viewer.inPt) viewer.outPt = null; invalidateClip(); updateIOUi(); }
+function setOut() { const el = viewer.mediaEl; if (!el) return; viewer.outPt = el.currentTime; if (viewer.inPt != null && viewer.inPt >= viewer.outPt) viewer.inPt = null; invalidateClip(); updateIOUi(); }
+vSetIn.addEventListener('click', setIn);
+vSetOut.addEventListener('click', setOut);
+vClearIO.addEventListener('click', () => { viewer.inPt = null; viewer.outPt = null; invalidateClip(); updateIOUi(); });
+document.getElementById('vClose').addEventListener('click', closeViewer);
+overlay.addEventListener('click', (e) => { if (e.target === overlay) closeViewer(); });
+
+// keyboard transport
+document.addEventListener('keydown', (e) => {
+  if (overlay.classList.contains('hidden')) return;
+  const el = viewer.mediaEl;
+  if (e.key === 'Escape') { closeViewer(); return; }
+  if (!el) return;
+  if (e.key === ' ') { e.preventDefault(); if (el.paused) el.play().catch(() => {}); else el.pause(); }
+  else if (e.key.toLowerCase() === 'i') { setIn(); }
+  else if (e.key.toLowerCase() === 'o') { setOut(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); seekTo(el.currentTime - 1 / viewer.fps); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); seekTo(el.currentTime + 1 / viewer.fps); }
+});
+
+// drag the whole original file
+vDragFull.addEventListener('dragstart', (e) => {
+  e.preventDefault();
+  if (viewer.item) window.api.startDrag(viewer.item.path);
+});
+
+// Step 1: build the In–Out clip with ffmpeg
+vMakeClip.addEventListener('click', async () => {
+  if (!viewer.item || viewer.item.type === 'image') return;
+  const inPt = viewer.inPt != null ? viewer.inPt : 0;
+  const outPt = viewer.outPt != null ? viewer.outPt : (viewer.mediaEl ? viewer.mediaEl.duration : 0);
+  if (!(outPt > inPt)) { setBusy(false, 'Bitte In/Out setzen (Out muss nach In liegen).'); return; }
+  vMakeClip.disabled = true;
+  vMakeClip.textContent = '… wird erzeugt';
+  setBusy(true, 'Erzeuge Ausschnitt…');
+  try {
+    const clipPath = await window.api.exportClip(viewer.item.path, inPt, outPt);
+    viewer.clipPath = clipPath;
+    vDragClip.disabled = false;
+    vMakeClip.textContent = '✓ Ausschnitt bereit';
+    setBusy(false, 'Ausschnitt bereit – jetzt „Ausschnitt ziehen" in Premiere ziehen.');
+  } catch (err) {
+    invalidateClip();
+    setBusy(false, 'Fehler beim Erzeugen des Ausschnitts.');
+  } finally {
+    vMakeClip.disabled = false;
+  }
+});
+
+// Step 2: drag the already-built clip (synchronous → native drag attaches to cursor)
+vDragClip.addEventListener('dragstart', (e) => {
+  e.preventDefault();
+  if (viewer.clipPath) window.api.startDrag(viewer.clipPath);
+});
+
+// ---------------- init ----------------
+(async function init() {
+  renderColorFilter();
+  await reloadState();
 })();

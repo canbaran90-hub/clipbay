@@ -92,6 +92,17 @@ async function makeImageThumb(filePath, outPath) {
   ]);
 }
 
+// Trim [inPt, inPt+dur] into outPath. Video is re-encoded for frame accuracy; audio is stream-copied.
+async function exportClip(filePath, inPt, dur, outPath, isVideo) {
+  const args = isVideo
+    ? ['-y', '-ss', String(inPt), '-i', filePath, '-t', String(dur),
+       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+       '-c:a', 'aac', '-movflags', '+faststart', outPath]
+    : ['-y', '-ss', String(inPt), '-i', filePath, '-t', String(dur), '-c', 'copy', outPath];
+  await run(FFMPEG, args);
+  return outPath;
+}
+
 async function ffmpegAvailable() {
   try {
     await run(FFMPEG, ['-version']);
@@ -107,6 +118,7 @@ module.exports = {
   makeVideoSprite,
   makeAudioWave,
   makeImageThumb,
+  exportClip,
   ffmpegAvailable,
   hashPath,
   SPRITE_COLS,

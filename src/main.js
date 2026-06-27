@@ -10,6 +10,7 @@ const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.t
 
 let store;
 let cacheDir;
+let clipsDir;
 let win;
 
 function typeForExt(ext) {
@@ -230,6 +231,19 @@ ipcMain.handle('reveal', (e, filePath) => {
   shell.showItemInFolder(filePath);
 });
 
+ipcMain.handle('export-clip', async (e, filePath, inPt, outPt) => {
+  const item = store.getItem(filePath);
+  const isVideo = item ? item.type === 'video' : true;
+  const dur = Math.max(0.05, outPt - inPt);
+  ensureDir(clipsDir);
+  const base = path.basename(filePath, path.extname(filePath)).replace(/[^\w.-]+/g, '_');
+  const stamp = `${Math.round(inPt * 1000)}-${Math.round(outPt * 1000)}`;
+  const ext = isVideo ? '.mp4' : path.extname(filePath);
+  const outPath = path.join(clipsDir, `${base}_${stamp}${ext}`);
+  await media.exportClip(filePath, inPt, dur, outPath, isVideo);
+  return outPath;
+});
+
 // OS-level drag of the REAL file -> drops straight into the Premiere project/timeline.
 ipcMain.on('drag-start', (e, filePath) => {
   const thumbPath = cachePathFor(filePath, 'thumb.jpg');
@@ -269,7 +283,9 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   cacheDir = path.join(app.getPath('userData'), 'cache');
+  clipsDir = path.join(app.getPath('userData'), 'clips');
   ensureDir(cacheDir);
+  ensureDir(clipsDir);
   store = new Store(path.join(app.getPath('userData'), 'clipbay-index.json'));
 
   const hasFfmpeg = await media.ffmpegAvailable();

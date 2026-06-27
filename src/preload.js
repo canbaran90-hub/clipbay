@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   setColor: (p, color) => ipcRenderer.invoke('set-color', p, color),
   setTags: (p, tags) => ipcRenderer.invoke('set-tags', p, tags),
   reveal: (p) => ipcRenderer.invoke('reveal', p),
+  exportClip: (p, inPt, outPt) => ipcRenderer.invoke('export-clip', p, inPt, outPt),
   startDrag: (p) => ipcRenderer.send('drag-start', p),
   onItemUpdated: (cb) => ipcRenderer.on('item-updated', (e, item) => cb(item)),
   onIndexProgress: (cb) => ipcRenderer.on('index-progress', (e, p) => cb(p)),

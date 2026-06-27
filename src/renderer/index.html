@@ -35,6 +35,10 @@
     <main id="main">
       <header id="topbar">
         <input id="search" type="text" placeholder="Suchen… (Name, Ordner, Tag)" />
+        <div class="size-control" title="Vorschaugröße">
+          <span class="size-ico">▦</span>
+          <input id="sizeSlider" type="range" min="140" max="480" step="20" value="220" />
+        </div>
         <div id="count" class="count"></div>
       </header>
 
@@ -52,6 +56,41 @@
   </footer>
 
   <audio id="audioEl"></audio>
+
+  <!-- Detail / Preview overlay -->
+  <div id="overlay" class="hidden">
+    <div class="viewer">
+      <div class="viewer-head">
+        <span class="v-name" id="vName"></span>
+        <button class="v-close" id="vClose" title="Schließen (Esc)">✕</button>
+      </div>
+      <div class="viewer-stage" id="vStage"></div>
+      <div class="viewer-controls">
+        <div class="timeline-bar" id="vTimeline">
+          <div class="played" id="vPlayed"></div>
+          <div class="range" id="vRange" style="display:none"></div>
+          <div class="mark" id="vMarkIn" style="display:none"></div>
+          <div class="mark" id="vMarkOut" style="display:none"></div>
+          <div class="playhead" id="vPlayhead"></div>
+        </div>
+        <div class="viewer-row">
+          <button class="btn" id="vPlay">▶ Play</button>
+          <span class="time" id="vTime">0:00 / 0:00</span>
+          <button class="btn" id="vSetIn" title="In-Point setzen (I)">[ In</button>
+          <button class="btn" id="vSetOut" title="Out-Point setzen (O)">Out ]</button>
+          <button class="btn" id="vClearIO" title="In/Out löschen">⟲</button>
+          <span class="io" id="vIO"></span>
+          <span class="sep"></span>
+          <button class="btn" id="vDragFull" draggable="true" title="Ganze Datei in Premiere ziehen">⇲ Ganze Datei ziehen</button>
+          <button class="btn" id="vMakeClip" title="In–Out-Ausschnitt per ffmpeg erzeugen">✂ Ausschnitt erzeugen</button>
+          <button class="btn accent" id="vDragClip" draggable="true" title="Erzeugten Ausschnitt in Premiere ziehen" disabled>⇲ Ausschnitt ziehen</button>
+        </div>
+        <div class="viewer-hint">
+          Leertaste = Play/Pause · I / O = In/Out · ←/→ = 1 Frame · „Ausschnitt ziehen" schneidet In–Out per ffmpeg und zieht den Clip in Premiere.
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="renderer.js"></script>
 </body>
