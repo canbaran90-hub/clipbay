@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   setTags: (p, tags) => ipcRenderer.invoke('set-tags', p, tags),
   reveal: (p) => ipcRenderer.invoke('reveal', p),
   openPath: (p) => ipcRenderer.invoke('open-path', p),
+  openInPremiere: (p) => ipcRenderer.invoke('open-in-premiere', p),
   exportClip: (p, inPt, outPt) => ipcRenderer.invoke('export-clip', p, inPt, outPt),
   previewProxy: (p) => ipcRenderer.invoke('preview-proxy', p),
   ensureSprite: (p) => ipcRenderer.invoke('ensure-sprite', p),

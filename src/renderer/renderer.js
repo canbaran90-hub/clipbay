@@ -373,14 +373,18 @@ function wireCardSelection(card, thumb, it) {
     else if (e.shiftKey) selectRange(it.path);
     else selectOnly(it.path);
   });
-  thumb.addEventListener('dblclick', () => openViewer(it));
+  thumb.addEventListener('dblclick', (e) => {
+    if (e.ctrlKey || e.metaKey) openInPremiere(it);  // Ctrl+double-click -> Premiere source monitor
+    else openViewer(it);                              // normal double-click -> ClipBay preview
+  });
   card.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (!state.selection.has(it.path)) selectOnly(it.path);
     const n = state.selection.size;
     showContextMenu(e.clientX, e.clientY, [
-      { label: 'Im Explorer anzeigen', action: () => window.api.reveal(it.path) },
+      { label: 'In Premiere (Quellmonitor) öffnen', action: () => openInPremiere(it) },
       { label: 'Im Vorschaufenster öffnen', action: () => openViewer(it) },
+      { label: 'Im Explorer anzeigen', action: () => window.api.reveal(it.path) },
       { sep: true },
       { label: n > 1 ? `${n} aus ClipBay entfernen` : 'Aus ClipBay entfernen', danger: true, action: () => deleteSelected() },
     ]);
@@ -403,6 +407,13 @@ async function deleteSelected() {
   await window.api.removeItems([...state.selection]);
   state.selection.clear();
   await reloadState();
+}
+
+async function openInPremiere(it) {
+  setBusy(true, 'Öffne in Premiere…');
+  const r = await window.api.openInPremiere(it.path);
+  if (r && r.ok) setBusy(false, 'Im Premiere-Quellmonitor geöffnet.');
+  else setBusy(false, 'Premiere-Bridge nicht erreichbar – in Premiere: Fenster ▸ Erweiterungen ▸ „ClipBay Bridge" öffnen.');
 }
 
 grid.addEventListener('click', (e) => { if (e.target === grid || e.target === gridInner) clearSelection(); });

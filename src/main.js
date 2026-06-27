@@ -1,8 +1,11 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, globalShortcut, screen } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const { Store } = require('./store');
 const media = require('./media');
+
+const BRIDGE_PORT = 7878; // ClipBay Bridge CEP panel inside Premiere
 
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.mpg', '.mpeg', '.wmv', '.flv', '.mxf', '.m2ts', '.ts']);
 const AUDIO_EXT = new Set(['.wav', '.mp3', '.aif', '.aiff', '.flac', '.m4a', '.ogg', '.aac', '.wma', '.opus']);
@@ -369,6 +372,20 @@ ipcMain.handle('reveal', (e, filePath) => {
 });
 
 ipcMain.handle('open-path', (e, p) => shell.openPath(p));
+
+// Ask the ClipBay Bridge panel (running inside Premiere) to open a file in the
+// Source Monitor. Resolves {ok:false} if the bridge isn't running.
+ipcMain.handle('open-in-premiere', (e, filePath) => new Promise((resolve) => {
+  const data = JSON.stringify({ path: filePath });
+  const req = http.request({
+    host: '127.0.0.1', port: BRIDGE_PORT, path: '/open', method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+    timeout: 2500,
+  }, (res) => { res.on('data', () => {}); res.on('end', () => resolve({ ok: true })); });
+  req.on('error', () => resolve({ ok: false }));
+  req.on('timeout', () => { req.destroy(); resolve({ ok: false }); });
+  req.write(data); req.end();
+}));
 
 ipcMain.handle('export-clip', async (e, filePath, inPt, outPt) => {
   const item = store.getItem(filePath);

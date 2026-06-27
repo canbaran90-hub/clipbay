@@ -65,10 +65,31 @@ Unter Windows alternativ: Doppelklick auf **`Start ClipBay.bat`**.
 - **JSON-Index** — bewusst ohne native Module (kein C++-Toolchain nötig).
   Für sehr große Bibliotheken später auf SQLite umstellbar.
 
+## In Premiere im Quellmonitor öffnen (optional)
+
+**Strg + Doppelklick** auf einen Clip öffnet ihn direkt im **Quellmonitor** von
+Premiere Pro – dort setzt du In/Out wie gewohnt und fügst ihn ein. (Normaler
+Doppelklick öffnet weiterhin die ClipBay-Vorschau.)
+
+Das braucht eine winzige Begleit-Erweiterung in Premiere (CEP-Panel), weil
+Premiere externe Programme nur über sein eigenes Scripting hereinlässt:
+
+```powershell
+# einmalig, im ClipBay-Ordner:
+powershell -ExecutionPolicy Bypass -File scripts/install-premiere-bridge.ps1
+```
+
+Danach: Premiere neu starten → **Fenster ▸ Erweiterungen ▸ ClipBay Bridge**
+öffnen und andocken (zeigt „Verbunden"). Solange das Panel offen ist, landet
+jeder Strg-Doppelklick aus ClipBay im Quellmonitor. Läuft lokal über
+`127.0.0.1:7878`, ändert keine Dateien.
+
 ## Roadmap
 
 - [x] Größen-Slider für Vorschaukarten
 - [x] Detail-/Player-Fenster (Doppelklick) mit In/Out und Ausschnitt-Export
+- [x] Strg+Doppelklick öffnet im Premiere-Quellmonitor (CEP-Bridge)
+- [x] Ordner-Drag-and-Drop, Live-Datei-Sync, virtualisiertes Grid, Sortierung
 - [ ] Datei-Watcher (neue Dateien automatisch erkennen)
 - [ ] Eigene Tags/Sammlungen als Sidebar-Einträge
 - [ ] Optionaler echter Proxy-Clip für flüssige Vollvorschau
