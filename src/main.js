@@ -204,6 +204,7 @@ function publicItem(item) {
     ext: item.ext,
     type: item.type,
     size: item.size,
+    mtime: item.mtime || 0,
     duration: item.duration,
     width: item.width,
     height: item.height,

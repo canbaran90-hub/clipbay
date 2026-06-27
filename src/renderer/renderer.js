@@ -13,6 +13,7 @@ const state = {
   lastClicked: null,    // for shift-range
   dirFilter: null,      // normalized directory path to show (null = all)
   expandedDirs: new Set(), // normalized dir paths that are expanded in the tree
+  sort: 'name-asc',
 };
 
 const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -64,10 +65,20 @@ function visibleItems() {
       if (!hay.includes(q)) return false;
     }
     return true;
-  }).sort((a, b) => {
-    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-    return a.name.localeCompare(b.name);
   });
+}
+
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+function sortItems(arr) {
+  switch (state.sort) {
+    case 'name-desc': return arr.sort((a, b) => byName(b, a));
+    case 'date-desc': return arr.sort((a, b) => (b.mtime || 0) - (a.mtime || 0) || byName(a, b));
+    case 'date-asc': return arr.sort((a, b) => (a.mtime || 0) - (b.mtime || 0) || byName(a, b));
+    case 'type': return arr.sort((a, b) => (a.type || '').localeCompare(b.type || '') || byName(a, b));
+    case 'size-desc': return arr.sort((a, b) => (b.size || 0) - (a.size || 0) || byName(a, b));
+    case 'name-asc':
+    default: return arr.sort(byName);
+  }
 }
 
 // ---------------- rendering (virtualized) ----------------
@@ -138,7 +149,7 @@ function renderWindow() {
 }
 
 function render() {
-  currentVisible = visibleItems();
+  currentVisible = sortItems(visibleItems());
   for (const p of [...state.selection]) if (!state.items.has(p)) state.selection.delete(p);
   updateCount();
   emptyEl.classList.toggle('hidden', state.items.size > 0);
@@ -533,6 +544,18 @@ document.getElementById('addFolderBtn').addEventListener('click', async () => {
 });
 document.getElementById('rescanBtn').addEventListener('click', () => { window.api.rescan(); setBusy(true); });
 document.getElementById('search').addEventListener('input', (e) => { state.search = e.target.value; renderTop(); });
+const sortSelect = document.getElementById('sortSelect');
+sortSelect.addEventListener('change', (e) => {
+  state.sort = e.target.value;
+  try { localStorage.setItem('clipbay.sort', state.sort); } catch (_) {}
+  renderTop();
+});
+(function initSort() {
+  let s = 'name-asc';
+  try { s = localStorage.getItem('clipbay.sort') || s; } catch (_) {}
+  state.sort = s;
+  sortSelect.value = s;
+})();
 document.querySelectorAll('.filter').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.filter').forEach((b) => b.classList.remove('active'));

@@ -35,6 +35,14 @@
     <main id="main">
       <header id="topbar">
         <input id="search" type="text" placeholder="Suchen… (Name, Ordner, Tag)" />
+        <select id="sortSelect" class="sort-select" title="Sortierung">
+          <option value="name-asc">Name A–Z</option>
+          <option value="name-desc">Name Z–A</option>
+          <option value="date-desc">Datum: neu → alt</option>
+          <option value="date-asc">Datum: alt → neu</option>
+          <option value="type">Typ</option>
+          <option value="size-desc">Größe: groß → klein</option>
+        </select>
         <div class="size-control" title="Vorschaugröße">
           <span class="size-ico">▦</span>
           <input id="sizeSlider" type="range" min="90" max="480" step="10" value="220" />
