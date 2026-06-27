@@ -70,17 +70,90 @@ function visibleItems() {
   });
 }
 
-// ---------------- rendering ----------------
+// ---------------- rendering (virtualized) ----------------
 let currentVisible = [];
+const gridInner = document.getElementById('gridInner');
+const GAP = 14, PAD = 16, BUFFER_ROWS = 3;
+let layout = { cols: 1, cardW: 220, cardH: 200, rows: 0 };
+let lastCardW = 0, lastCardH = 0;
+
+function getCardSize() {
+  return parseInt(sizeSlider.value, 10) || 220;
+}
+
+// Measure exact card height for a given width (constant per width since text is single-line).
+function measureCardHeight(cardW) {
+  if (cardW === lastCardW && lastCardH) return lastCardH;
+  const sampleItem = currentVisible[0] || {
+    path: '__sample__', name: 'Sample', ext: '.mp4', type: 'video', size: 0, duration: 0,
+    folderId: '', favorite: false, color: null, tags: [], thumb: null,
+    spriteCols: 5, spriteRows: 5, spriteCount: 25, src: '',
+  };
+  const sample = buildCard(sampleItem);
+  sample.style.position = 'absolute'; sample.style.visibility = 'hidden';
+  sample.style.left = '-9999px'; sample.style.top = '0'; sample.style.width = cardW + 'px';
+  gridInner.appendChild(sample);
+  const h = sample.offsetHeight || 200;
+  sample.remove();
+  lastCardW = cardW; lastCardH = h;
+  return h;
+}
+
+function computeLayout() {
+  const avail = Math.max(0, grid.clientWidth - PAD * 2);
+  const cs = getCardSize();
+  const cols = Math.max(1, Math.floor((avail + GAP) / (cs + GAP)));
+  const cardW = Math.max(120, Math.floor((avail - (cols - 1) * GAP) / cols));
+  const cardH = measureCardHeight(cardW);
+  const rows = Math.ceil(currentVisible.length / cols);
+  layout = { cols, cardW, cardH, rows };
+  gridInner.style.height = (PAD * 2 + rows * cardH + Math.max(0, rows - 1) * GAP) + 'px';
+}
+
+// Render only the cards inside (or near) the viewport.
+function renderWindow() {
+  const { cols, cardW, cardH, rows } = layout;
+  const rowStride = cardH + GAP;
+  const scrollTop = grid.scrollTop;
+  const vh = grid.clientHeight;
+  const firstRow = Math.max(0, Math.floor((scrollTop - PAD) / rowStride) - BUFFER_ROWS);
+  const lastRow = Math.min(rows - 1, Math.floor((scrollTop + vh - PAD) / rowStride) + BUFFER_ROWS);
+  const start = firstRow * cols;
+  const end = Math.min(currentVisible.length, (lastRow + 1) * cols);
+
+  gridInner.innerHTML = '';
+  for (let i = start; i < end; i++) {
+    const it = currentVisible[i];
+    if (!it) continue;
+    const card = buildCard(it);
+    const row = Math.floor(i / cols), col = i % cols;
+    card.style.position = 'absolute';
+    card.style.width = cardW + 'px';
+    card.style.left = (PAD + col * (cardW + GAP)) + 'px';
+    card.style.top = (PAD + row * rowStride) + 'px';
+    gridInner.appendChild(card);
+  }
+}
+
 function render() {
   currentVisible = visibleItems();
-  // prune selection to visible+existing
   for (const p of [...state.selection]) if (!state.items.has(p)) state.selection.delete(p);
   updateCount();
-  grid.innerHTML = '';
   emptyEl.classList.toggle('hidden', state.items.size > 0);
-  for (const it of currentVisible) grid.appendChild(buildCard(it));
+  computeLayout();
+  renderWindow();
 }
+
+function renderTop() { grid.scrollTop = 0; render(); }
+
+let scrollQueued = false;
+grid.addEventListener('scroll', () => {
+  if (scrollQueued) return;
+  scrollQueued = true;
+  requestAnimationFrame(() => { scrollQueued = false; renderWindow(); });
+});
+let resizeTimer = null;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { lastCardW = 0; render(); }, 120); });
 
 function updateCount() {
   const n = currentVisible.length;
@@ -180,7 +253,7 @@ function wireThumbInteraction(thumb, scrubLine, it) {
     thumb.addEventListener('mouseenter', async () => {
       if (!sprite && !requesting) {
         requesting = true;
-        try { const url = await window.api.ensureSprite(it.path); if (url) sprite = url; } catch (_) {}
+        try { const url = await window.api.ensureSprite(it.path); if (url) { sprite = url; it.sprite = url; } } catch (_) {}
         requesting = false;
       }
       if (!sprite) return;
@@ -232,7 +305,7 @@ function stopAudioFor(it) { if (currentAudioPath === it.path) audioEl.pause(); }
 
 // ---------------- selection + drag ----------------
 function applySelectionClasses() {
-  for (const card of grid.children) {
+  for (const card of gridInner.children) {
     card.classList.toggle('selected', state.selection.has(card.dataset.path));
   }
   updateCount();
@@ -319,7 +392,7 @@ async function deleteSelected() {
   await reloadState();
 }
 
-grid.addEventListener('click', (e) => { if (e.target === grid) clearSelection(); });
+grid.addEventListener('click', (e) => { if (e.target === grid || e.target === gridInner) clearSelection(); });
 
 // ---------------- sidebar folder tree (Premiere-style) ----------------
 // Build a directory tree from item paths, rooted at each added folder.
@@ -354,7 +427,7 @@ function renderFolders() {
   const allLi = document.createElement('li');
   allLi.className = 'tree-row' + (state.dirFilter === null ? ' active' : '');
   allLi.innerHTML = `<span class="caret"></span><span class="fname">📁 Alle Ordner</span>`;
-  allLi.addEventListener('click', () => { state.dirFilter = null; renderFolders(); render(); });
+  allLi.addEventListener('click', () => { state.dirFilter = null; renderFolders(); renderTop(); });
   folderListEl.appendChild(allLi);
 
   for (const root of buildTrees()) renderTreeNode(root, 0, true);
@@ -407,12 +480,12 @@ function renderTreeNode(node, depth, isRoot) {
     li.appendChild(rm);
   }
 
-  li.addEventListener('click', () => { state.dirFilter = node.path; renderFolders(); render(); });
+  li.addEventListener('click', () => { state.dirFilter = node.path; renderFolders(); renderTop(); });
   li.addEventListener('contextmenu', (e) => {
     e.preventDefault(); e.stopPropagation();
     const items = [
       { label: 'Im Explorer öffnen', action: () => window.api.openPath(node.path) },
-      { label: 'Nur diesen Ordner zeigen', action: () => { state.dirFilter = node.path; renderFolders(); render(); } },
+      { label: 'Nur diesen Ordner zeigen', action: () => { state.dirFilter = node.path; renderFolders(); renderTop(); } },
     ];
     if (isRoot) {
       items.push({ sep: true }, {
@@ -445,7 +518,7 @@ function renderColorFilter() {
     d.style.background = hex; d.title = key;
     d.addEventListener('click', () => {
       state.colorFilter = state.colorFilter === key ? null : key;
-      renderColorFilter(); render();
+      renderColorFilter(); renderTop();
     });
     wrap.appendChild(d);
   }
@@ -457,13 +530,13 @@ document.getElementById('addFolderBtn').addEventListener('click', async () => {
   if (added) { state.folders = (await window.api.getState()).folders; renderFolders(); setBusy(true); }
 });
 document.getElementById('rescanBtn').addEventListener('click', () => { window.api.rescan(); setBusy(true); });
-document.getElementById('search').addEventListener('input', (e) => { state.search = e.target.value; render(); });
+document.getElementById('search').addEventListener('input', (e) => { state.search = e.target.value; renderTop(); });
 document.querySelectorAll('.filter').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.filter').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
     state.filter = btn.dataset.filter;
-    render();
+    renderTop();
   });
 });
 
@@ -519,17 +592,15 @@ async function reloadState() {
 
 // ---------------- preview size slider ----------------
 const sizeSlider = document.getElementById('sizeSlider');
-function applyCardSize(px) { grid.style.setProperty('--card-size', px + 'px'); }
 sizeSlider.addEventListener('input', (e) => {
-  const px = parseInt(e.target.value, 10);
-  applyCardSize(px);
-  try { localStorage.setItem('clipbay.cardSize', String(px)); } catch (_) {}
+  try { localStorage.setItem('clipbay.cardSize', e.target.value); } catch (_) {}
+  lastCardW = 0; // force re-measure of card height
+  render();
 });
 (function initSize() {
   let px = 220;
   try { const saved = parseInt(localStorage.getItem('clipbay.cardSize'), 10); if (saved) px = saved; } catch (_) {}
   sizeSlider.value = String(px);
-  applyCardSize(px);
 })();
 
 // ---------------- drop folders into ClipBay ----------------
