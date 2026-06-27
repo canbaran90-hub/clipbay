@@ -19,7 +19,10 @@ die schnell durch Footage **und** Sound-Effekte **und** Musik browsen wollen.
 - 🔎 **Universelle Suche** — über Name, Ordner und Tags.
 - ⭐ **Favoriten & Farb-Labels** — wie in Premiere/Finder, inkl. Filter nach Farbe.
 - 🧰 **Filter** — Alle / Favoriten / Video / Audio / Bilder.
-- 🖱️ **Drag-and-Drop nach Premiere** — zieht die echte Originaldatei ins Projekt-/Timeline-Fenster.
+- 🔍 **Größen-Slider** — Vorschaukarten stufenlos größer/kleiner (wird gespeichert).
+- 🖼️ **Detail-Vorschau (Doppelklick)** — Datei groß im Fenster ansehen, abspielen, scrubben, framegenau steppen.
+- ✂️ **In/Out-Points** — Ausschnitt setzen (I/O-Tasten), per ffmpeg schneiden und als Clip in Premiere ziehen.
+- 🖱️ **Drag-and-Drop nach Premiere** — zieht die echte Originaldatei (oder den getrimmten Ausschnitt) ins Projekt-/Timeline-Fenster.
 
 ## Voraussetzungen
 
@@ -60,8 +63,9 @@ Unter Windows alternativ: Doppelklick auf **`Start ClipBay.bat`**.
 
 ## Roadmap
 
+- [x] Größen-Slider für Vorschaukarten
+- [x] Detail-/Player-Fenster (Doppelklick) mit In/Out und Ausschnitt-Export
 - [ ] Datei-Watcher (neue Dateien automatisch erkennen)
-- [ ] Detail-/Player-Fenster mit großem Waveform und Loop-Region
 - [ ] Eigene Tags/Sammlungen als Sidebar-Einträge
 - [ ] Optionaler echter Proxy-Clip für flüssige Vollvorschau
 - [ ] SQLite-Backend + Volltextsuche für 50k+ Assets
