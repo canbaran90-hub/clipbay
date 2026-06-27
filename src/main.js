@@ -19,10 +19,20 @@ let win;
 
 // Launcher behaviour: the global shortcut toggles the window. ClipBay stays open
 // while you work in Premiere; hide it manually with Ctrl+Alt+C or Esc.
+// We capture the exact position right before hiding and restore it on show, so
+// it always reappears where it was last hidden (incl. multi-monitor).
+let lastBounds = null;
+
+function hideWindow() {
+  if (!win) return;
+  if (win.isVisible()) { lastBounds = win.getBounds(); persistBounds(lastBounds); }
+  win.hide();
+}
+
 function showAndFocus() {
   if (!win) return;
   if (win.isMinimized()) win.restore();
-  // No centering: reappear where the user last left it (e.g. docked to one side).
+  if (lastBounds) win.setBounds(lastBounds); // exactly where it was last hidden
   win.setAlwaysOnTop(true);
   win.show();
   win.focus();
@@ -32,7 +42,7 @@ function showAndFocus() {
 
 function toggleWindow() {
   if (!win) return;
-  if (win.isVisible() && win.isFocused()) win.hide();
+  if (win.isVisible() && win.isFocused()) hideWindow();
   else showAndFocus();
 }
 
@@ -419,7 +429,7 @@ ipcMain.handle('preview-proxy', async (e, filePath) => {
   return fileUrl(out);
 });
 
-ipcMain.on('hide-window', () => { if (win) win.hide(); });
+ipcMain.on('hide-window', () => { hideWindow(); });
 
 // OS-level drag of the REAL file(s) -> drops straight into the Premiere project/timeline.
 ipcMain.on('drag-start', (e, paths) => {
@@ -454,9 +464,11 @@ ipcMain.on('drag-start', (e, paths) => {
 function windowStateFile() { return path.join(app.getPath('userData'), 'clipbay-window.json'); }
 function loadBounds() { try { return JSON.parse(fs.readFileSync(windowStateFile(), 'utf8')); } catch (_) { return null; } }
 let saveBoundsTimer = null;
+function persistBounds(b) { try { fs.writeFileSync(windowStateFile(), JSON.stringify(b)); } catch (_) {} }
 function saveBounds() {
   if (!win || win.isDestroyed() || !win.isVisible()) return;
-  try { fs.writeFileSync(windowStateFile(), JSON.stringify(win.getBounds())); } catch (_) {}
+  lastBounds = win.getBounds();
+  persistBounds(lastBounds);
 }
 function scheduleSaveBounds() { if (saveBoundsTimer) clearTimeout(saveBoundsTimer); saveBoundsTimer = setTimeout(saveBounds, 500); }
 function boundsOnScreen(b) {
@@ -471,6 +483,7 @@ function boundsOnScreen(b) {
 function createWindow() {
   const b = loadBounds();
   const useB = boundsOnScreen(b);
+  if (useB) lastBounds = b; // restore exact spot on first show too
   win = new BrowserWindow({
     width: (b && b.width) || 1280,
     height: (b && b.height) || 820,
