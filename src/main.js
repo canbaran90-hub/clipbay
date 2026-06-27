@@ -113,7 +113,10 @@ async function indexFile(filePath, folderId) {
   if (!type) return;
 
   const existing = store.getItem(filePath);
-  const unchanged = existing && existing.mtime === stat.mtimeMs && existing.assetsReady;
+  // Only treat as "unchanged" if the preview actually exists on disk -> self-heals
+  // items that were marked ready but never got a thumbnail/waveform.
+  const thumbOnDisk = fs.existsSync(cachePathFor(filePath, 'thumb.jpg'));
+  const unchanged = existing && existing.mtime === stat.mtimeMs && existing.assetsReady && thumbOnDisk;
 
   const dir = path.dirname(cachePathFor(filePath, 'x'));
   ensureDir(dir);
@@ -335,29 +338,40 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
-app.whenReady().then(async () => {
-  cacheDir = path.join(app.getPath('userData'), 'cache');
-  clipsDir = path.join(app.getPath('userData'), 'clips');
-  previewDir = path.join(app.getPath('userData'), 'preview');
-  ensureDir(cacheDir);
-  ensureDir(clipsDir);
-  ensureDir(previewDir);
-  store = new Store(path.join(app.getPath('userData'), 'clipbay-index.json'));
+// Only allow one ClipBay instance — a second launch just focuses the running one.
+// This also avoids userData cache locks (the "Unable to create cache" errors).
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => { showAndFocus(); });
 
-  const hasFfmpeg = await media.ffmpegAvailable();
-  createWindow();
-  win.webContents.once('did-finish-load', () => {
-    if (!hasFfmpeg) send('ffmpeg-missing', true);
+  app.whenReady().then(async () => {
+    cacheDir = path.join(app.getPath('userData'), 'cache');
+    clipsDir = path.join(app.getPath('userData'), 'clips');
+    previewDir = path.join(app.getPath('userData'), 'preview');
+    ensureDir(cacheDir);
+    ensureDir(clipsDir);
+    ensureDir(previewDir);
+    store = new Store(path.join(app.getPath('userData'), 'clipbay-index.json'));
+
+    const hasFfmpeg = await media.ffmpegAvailable();
+    createWindow();
+    win.webContents.once('did-finish-load', () => {
+      if (!hasFfmpeg) send('ffmpeg-missing', true);
+      // Auto-refresh on launch: picks up new files and regenerates missing previews.
+      for (const f of store.getFolders()) scanFolder(f);
+    });
+
+    // Global launcher hotkey: toggle ClipBay from anywhere (e.g. while in Premiere).
+    const reg = globalShortcut.register('CommandOrControl+Alt+C', toggleWindow);
+    if (!reg) console.error('Globaler Shortcut Ctrl+Alt+C konnte nicht registriert werden.');
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-
-  // Global launcher hotkey: toggle ClipBay from anywhere (e.g. while in Premiere).
-  const reg = globalShortcut.register('CommandOrControl+Alt+C', toggleWindow);
-  if (!reg) console.error('Globaler Shortcut Ctrl+Alt+C konnte nicht registriert werden.');
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+}
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
