@@ -51,10 +51,18 @@ async function probe(filePath) {
       height: v ? v.height : null,
       hasVideo: !!v,
       hasAudio: !!a,
+      pixFmt: v ? v.pix_fmt : null,
+      vcodec: v ? v.codec_name : null,
     };
   } catch (e) {
-    return { duration: 0, width: null, height: null, hasVideo: false, hasAudio: false };
+    return { duration: 0, width: null, height: null, hasVideo: false, hasAudio: false, pixFmt: null, vcodec: null };
   }
+}
+
+// Transparent / intra-frame formats that Chromium can't play and that must keep alpha.
+function hasAlpha(meta) {
+  const pf = (meta && meta.pixFmt || '').toLowerCase();
+  return ['yuva', 'rgba', 'argb', 'abgr', 'bgra', 'gbrap', 'ya8', 'ya16'].some((t) => pf.includes(t));
 }
 
 async function makeVideoThumb(filePath, outPath, duration) {
@@ -92,14 +100,33 @@ async function makeImageThumb(filePath, outPath) {
   ]);
 }
 
-// Trim [inPt, inPt+dur] into outPath. Video is re-encoded for frame accuracy; audio is stream-copied.
-async function exportClip(filePath, inPt, dur, outPath, isVideo) {
-  const args = isVideo
-    ? ['-y', '-ss', String(inPt), '-i', filePath, '-t', String(dur),
-       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
-       '-c:a', 'aac', '-movflags', '+faststart', outPath]
-    : ['-y', '-ss', String(inPt), '-i', filePath, '-t', String(dur), '-c', 'copy', outPath];
+// Trim [inPt, inPt+dur] into outPath.
+//  mode 'copy'  -> stream copy (intra-frame/alpha sources: frame-accurate, keeps transparency)
+//  mode 'h264'  -> re-encode (long-GOP video: frame-accurate)
+//  mode 'audio' -> audio stream copy
+async function exportClip(filePath, inPt, dur, outPath, mode) {
+  let args;
+  if (mode === 'h264') {
+    args = ['-y', '-ss', String(inPt), '-i', filePath, '-t', String(dur),
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-movflags', '+faststart', outPath];
+  } else {
+    // copy / audio
+    args = ['-y', '-ss', String(inPt), '-i', filePath, '-t', String(dur), '-c', 'copy', outPath];
+  }
   await run(FFMPEG, args);
+  return outPath;
+}
+
+// Browser-playable proxy (H.264/yuv420p) for sources Chromium can't decode (ProRes, MXF, alpha .mov…).
+// Transparency is flattened onto black — fine for preview/scrubbing. The original stays untouched.
+async function makePreviewProxy(filePath, outPath) {
+  await run(FFMPEG, [
+    '-y', '-i', filePath,
+    '-vf', "scale='min(1280,iw)':-2",
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-movflags', '+faststart', outPath,
+  ]);
   return outPath;
 }
 
@@ -119,6 +146,8 @@ module.exports = {
   makeAudioWave,
   makeImageThumb,
   exportClip,
+  makePreviewProxy,
+  hasAlpha,
   ffmpegAvailable,
   hashPath,
   SPRITE_COLS,

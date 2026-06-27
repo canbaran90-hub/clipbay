@@ -11,6 +11,7 @@ const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.t
 let store;
 let cacheDir;
 let clipsDir;
+let previewDir;
 let win;
 
 // Launcher behaviour: global shortcut toggles the window; after a drag-out the
@@ -262,10 +263,26 @@ ipcMain.handle('export-clip', async (e, filePath, inPt, outPt) => {
   ensureDir(clipsDir);
   const base = path.basename(filePath, path.extname(filePath)).replace(/[^\w.-]+/g, '_');
   const stamp = `${Math.round(inPt * 1000)}-${Math.round(outPt * 1000)}`;
-  const ext = isVideo ? '.mp4' : path.extname(filePath);
+
+  let mode, ext;
+  if (!isVideo) {
+    mode = 'audio'; ext = path.extname(filePath) || '.wav';
+  } else {
+    const meta = await media.probe(filePath);
+    if (media.hasAlpha(meta)) { mode = 'copy'; ext = path.extname(filePath) || '.mov'; } // keep transparency
+    else { mode = 'h264'; ext = '.mp4'; }
+  }
   const outPath = path.join(clipsDir, `${base}_${stamp}${ext}`);
-  await media.exportClip(filePath, inPt, dur, outPath, isVideo);
+  await media.exportClip(filePath, inPt, dur, outPath, mode);
   return outPath;
+});
+
+// Build (and cache) an H.264 proxy for sources the browser can't play (ProRes/alpha/MXF…).
+ipcMain.handle('preview-proxy', async (e, filePath) => {
+  ensureDir(previewDir);
+  const out = path.join(previewDir, media.hashPath(filePath) + '.mp4');
+  if (!fs.existsSync(out)) await media.makePreviewProxy(filePath, out);
+  return fileUrl(out);
 });
 
 ipcMain.on('hide-window', () => { if (win) win.hide(); });
@@ -321,8 +338,10 @@ function createWindow() {
 app.whenReady().then(async () => {
   cacheDir = path.join(app.getPath('userData'), 'cache');
   clipsDir = path.join(app.getPath('userData'), 'clips');
+  previewDir = path.join(app.getPath('userData'), 'preview');
   ensureDir(cacheDir);
   ensureDir(clipsDir);
+  ensureDir(previewDir);
   store = new Store(path.join(app.getPath('userData'), 'clipbay-index.json'));
 
   const hasFfmpeg = await media.ffmpegAvailable();

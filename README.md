@@ -16,6 +16,10 @@ die schnell durch Footage **und** Sound-Effekte **und** Musik browsen wollen.
 - 📁 **Ordner hinzufügen statt importieren** — liest deine bestehenden Ordner direkt, keine Doppel-Kopien.
 - 🎞️ **Video-Hover-Scrub** — beim Drüberfahren scrubbst du durch den Clip (vorgerenderte 5×5-Sprite-Sheets → instant, kein Decode pro Hover).
 - 🔊 **Audio-Vorschau mit Waveform** — Welle im Grid; mit der Maus drüberfahren = scrubben + anhören.
+- 🌳 **Ordner-Baum** — wie in Premiere durch Ordner/Unterordner klicken; rechts erscheinen nur die Clips des gewählten Ordners.
+- 🧊 **Transparente Videos** — ProRes 4444 / Alpha-.mov: Vorschau via H.264-Proxy, In/Out-Schnitt behält die Transparenz (Stream-Copy).
+- 🗂️ **Mehrfachauswahl** — Klick / Strg+Klick / Shift / Strg+A; mehrere Clips gleichzeitig nach Premiere ziehen; Entf entfernt aus ClipBay.
+- ⚡ **Launcher-Shortcut Ctrl+Alt+C** — von überall (auch aus Premiere) zentriert öffnen; nach dem Drag versteckt sich ClipBay automatisch.
 - 🔎 **Universelle Suche** — über Name, Ordner und Tags.
 - ⭐ **Favoriten & Farb-Labels** — wie in Premiere/Finder, inkl. Filter nach Farbe.
 - 🧰 **Filter** — Alle / Favoriten / Video / Audio / Bilder.

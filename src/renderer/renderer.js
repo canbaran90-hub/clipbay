@@ -11,7 +11,12 @@ const state = {
   search: '',
   selection: new Set(), // selected paths
   lastClicked: null,    // for shift-range
+  dirFilter: null,      // normalized directory path to show (null = all)
+  expandedDirs: new Set(), // normalized dir paths that are expanded in the tree
 };
+
+const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+const baseName = (p) => norm(p).split('/').filter(Boolean).pop() || p;
 
 const grid = document.getElementById('grid');
 const emptyEl = document.getElementById('empty');
@@ -50,6 +55,10 @@ function visibleItems() {
     if (state.filter === 'favorite' && !it.favorite) return false;
     if (['video', 'audio', 'image'].includes(state.filter) && it.type !== state.filter) return false;
     if (state.colorFilter && it.color !== state.colorFilter) return false;
+    if (state.dirFilter) {
+      const ip = norm(it.path);
+      if (ip !== state.dirFilter && !ip.startsWith(state.dirFilter + '/')) return false;
+    }
     if (q) {
       const hay = (it.name + ' ' + folderName(it.folderId) + ' ' + (it.tags || []).join(' ')).toLowerCase();
       if (!hay.includes(q)) return false;
@@ -268,28 +277,98 @@ async function deleteSelected() {
 
 grid.addEventListener('click', (e) => { if (e.target === grid) clearSelection(); });
 
-// ---------------- sidebar ----------------
+// ---------------- sidebar folder tree (Premiere-style) ----------------
+// Build a directory tree from item paths, rooted at each added folder.
+function buildTrees() {
+  const roots = state.folders.map((f) => ({
+    path: norm(f.path), name: baseName(f.path), folderId: f.id, children: new Map(), count: 0,
+  }));
+  for (const it of state.items.values()) {
+    const ip = norm(it.path);
+    const root = roots.find((r) => ip === r.path || ip.startsWith(r.path + '/'));
+    if (!root) continue;
+    const dir = ip.slice(0, ip.lastIndexOf('/'));
+    let node = root; node.count++;
+    if (dir.length > root.path.length) {
+      const segs = dir.slice(root.path.length + 1).split('/');
+      let acc = root.path;
+      for (const seg of segs) {
+        acc = acc + '/' + seg;
+        let child = node.children.get(seg);
+        if (!child) { child = { path: acc, name: seg, children: new Map(), count: 0 }; node.children.set(seg, child); }
+        node = child; node.count++;
+      }
+    }
+  }
+  return roots;
+}
+
 function renderFolders() {
   folderListEl.innerHTML = '';
-  for (const f of state.folders) {
-    const li = document.createElement('li');
-    const name = document.createElement('span');
-    name.className = 'fname';
-    name.textContent = f.path.split(/[\\/]/).filter(Boolean).pop() || f.path;
-    name.title = f.path;
+
+  // "Alle Ordner" reset entry
+  const allLi = document.createElement('li');
+  allLi.className = 'tree-row' + (state.dirFilter === null ? ' active' : '');
+  allLi.innerHTML = `<span class="caret"></span><span class="fname">📁 Alle Ordner</span>`;
+  allLi.addEventListener('click', () => { state.dirFilter = null; renderFolders(); render(); });
+  folderListEl.appendChild(allLi);
+
+  for (const root of buildTrees()) renderTreeNode(root, 0, true);
+}
+
+function renderTreeNode(node, depth, isRoot) {
+  const hasChildren = node.children.size > 0;
+  const expanded = state.expandedDirs.has(node.path);
+
+  const li = document.createElement('li');
+  li.className = 'tree-row' + (state.dirFilter === node.path ? ' active' : '');
+  li.style.paddingLeft = (8 + depth * 14) + 'px';
+
+  const caret = document.createElement('span');
+  caret.className = 'caret' + (hasChildren ? (expanded ? ' open' : ' closed') : '');
+  caret.textContent = hasChildren ? (expanded ? '▾' : '▸') : '';
+  caret.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!hasChildren) return;
+    if (expanded) state.expandedDirs.delete(node.path); else state.expandedDirs.add(node.path);
+    renderFolders();
+  });
+
+  const name = document.createElement('span');
+  name.className = 'fname';
+  name.textContent = (isRoot ? '🗂 ' : '') + node.name;
+  name.title = node.path;
+
+  const count = document.createElement('span');
+  count.className = 'fcount';
+  count.textContent = node.count;
+
+  li.appendChild(caret);
+  li.appendChild(name);
+  li.appendChild(count);
+
+  if (isRoot) {
     const rm = document.createElement('button');
     rm.className = 'remove'; rm.textContent = '✕'; rm.title = 'Ordner aus ClipBay entfernen';
     rm.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const ok = confirm(`Ordner aus ClipBay entfernen?\n\n${f.path}\n\nDeine Dateien auf der Festplatte bleiben unberührt.`);
+      const ok = confirm(`Ordner aus ClipBay entfernen?\n\n${node.path}\n\nDeine Dateien auf der Festplatte bleiben unberührt.`);
       if (!ok) return;
       setBusy(true, 'Ordner wird entfernt…');
-      await window.api.removeFolder(f.id);
+      if (state.dirFilter && (state.dirFilter === node.path || state.dirFilter.startsWith(node.path + '/'))) state.dirFilter = null;
+      await window.api.removeFolder(node.folderId);
       await reloadState();
       setBusy(false, 'Bereit');
     });
-    li.appendChild(name); li.appendChild(rm);
-    folderListEl.appendChild(li);
+    li.appendChild(rm);
+  }
+
+  li.addEventListener('click', () => { state.dirFilter = node.path; renderFolders(); render(); });
+  folderListEl.appendChild(li);
+
+  if (hasChildren && expanded) {
+    const kids = [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name));
+    for (const child of kids) renderTreeNode(child, depth + 1, false);
   }
 }
 
@@ -356,6 +435,10 @@ async function reloadState() {
   state.folders = st.folders;
   state.items = new Map();
   for (const it of st.items) state.items.set(it.path, it);
+  for (const f of state.folders) state.expandedDirs.add(norm(f.path)); // roots expanded by default
+  if (state.dirFilter && !state.folders.some((f) => state.dirFilter === norm(f.path) || state.dirFilter.startsWith(norm(f.path) + '/'))) {
+    state.dirFilter = null;
+  }
   renderFolders();
   render();
 }
@@ -437,7 +520,7 @@ function fmtTime(sec) {
 }
 
 function openViewer(it) {
-  viewer.item = it; viewer.inPt = null; viewer.outPt = null;
+  viewer.item = it; viewer.inPt = null; viewer.outPt = null; viewer.usingProxy = false;
   vName.textContent = it.name;
   vStage.innerHTML = '';
   overlay.classList.remove('hidden');
@@ -473,13 +556,32 @@ function openViewer(it) {
   viewer.mediaEl = el;
   setTransport(true);
 
-  el.addEventListener('loadedmetadata', () => { updateTransport(); updateIOUi(); });
+  el.addEventListener('loadedmetadata', () => {
+    updateTransport(); updateIOUi();
+    // Loaded but undecodable (e.g. ProRes) -> swap to proxy.
+    if (it.type === 'video' && el.videoWidth === 0) maybeUseProxy(el);
+  });
+  if (it.type === 'video') el.addEventListener('error', () => maybeUseProxy(el), { once: true });
   el.addEventListener('timeupdate', onTimeUpdate);
   el.addEventListener('play', () => { vPlay.textContent = '❚❚ Pause'; });
   el.addEventListener('pause', () => { vPlay.textContent = '▶ Play'; });
 
   wireStage(dragTarget);
   el.play().catch(() => {});
+}
+
+// Chromium can't decode ProRes/alpha/MXF; build & play an H.264 proxy instead.
+function maybeUseProxy(el) {
+  if (!viewer.item || viewer.mediaEl !== el || viewer.usingProxy) return;
+  viewer.usingProxy = true;
+  setBusy(true, 'Vorschau wird konvertiert… (einmalig pro Datei)');
+  window.api.previewProxy(viewer.item.path).then((url) => {
+    if (viewer.mediaEl !== el) return; // viewer changed meanwhile
+    el.src = url;
+    el.load();
+    el.play().catch(() => {});
+    setBusy(false, 'Bereit');
+  }).catch(() => setBusy(false, 'Vorschau-Konvertierung fehlgeschlagen.'));
 }
 
 function wireStage(target) {
