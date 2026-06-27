@@ -16,7 +16,22 @@ let win;
 
 // Launcher behaviour: global shortcut toggles the window; after a drag-out the
 // window auto-hides so the user can keep editing in Premiere.
+// We never hide synchronously during a drag (that cancels it). Instead we "arm"
+// on drag-start and hide only once the window loses focus (= the drop landed in
+// another app), with a short delay so we never hide mid-drag.
+let dragArmed = false;
+let dragArmedAt = 0;
+let dragArmTimer = null;
+
+function armDragHide() {
+  dragArmed = true;
+  dragArmedAt = Date.now();
+  if (dragArmTimer) clearTimeout(dragArmTimer);
+  dragArmTimer = setTimeout(() => { dragArmed = false; }, 6000);
+}
+
 function showAndFocus() {
+  dragArmed = false;
   if (!win) return;
   if (win.isMinimized()) win.restore();
   win.center();
@@ -398,10 +413,8 @@ ipcMain.on('drag-start', (e, paths) => {
   }
   const item = arr.length > 1 ? { files: arr, icon } : { file: arr[0], icon };
   try {
-    // On Windows startDrag runs a modal loop and BLOCKS until the drop completes.
-    e.sender.startDrag(item);
-    // Drag finished -> auto-hide so the user lands back in Premiere.
-    if (process.platform === 'win32' && win && !win.isDestroyed()) win.hide();
+    armDragHide();            // arm BEFORE the drag so the drop-time blur is caught
+    e.sender.startDrag(item); // do NOT hide here — that would cancel the drag
   } catch (err) {
     console.error('startDrag failed:', err.message);
   }
@@ -421,6 +434,17 @@ function createWindow() {
   });
   win.removeMenu();
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // Auto-hide after a drag: only once focus is lost (drop landed in Premiere),
+  // and only if at least 250ms passed since drag-start (never mid-drag).
+  win.on('blur', () => {
+    if (dragArmed && Date.now() - dragArmedAt > 250) {
+      dragArmed = false;
+      if (dragArmTimer) clearTimeout(dragArmTimer);
+      win.hide();
+    }
+  });
+  win.on('focus', () => { dragArmed = false; });
 
   // Reload shortcuts handled in the main process, so they work even if the
   // renderer is busy: Ctrl/Cmd+R and F5 reload the window.
