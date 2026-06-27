@@ -175,6 +175,15 @@ button.primary:hover { filter: brightness(1.08); }
 
 .colorbar { height: 3px; width: 100%; background: transparent; }
 
+/* Compact cards (small slider sizes): hide color dots, tighten text.
+   The assigned color still shows as the top colorbar. */
+.card.compact .dots { display: none; }
+.card.compact .meta { padding: 5px 7px; gap: 1px; }
+.card.compact .meta .name { font-size: 11px; }
+.card.compact .meta .sub { font-size: 9.5px; }
+.card.compact .star { font-size: 13px; top: 4px; left: 4px; }
+.card.compact .badge { font-size: 9px; padding: 1px 4px; bottom: 4px; right: 4px; }
+
 .meta { padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; }
 .meta .name {
   font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

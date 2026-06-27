@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, globalShortcut, screen } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { Store } = require('./store');
@@ -34,7 +34,7 @@ function showAndFocus() {
   dragArmed = false;
   if (!win) return;
   if (win.isMinimized()) win.restore();
-  win.center();
+  // No centering: reappear where the user last left it (e.g. docked to one side).
   win.setAlwaysOnTop(true);
   win.show();
   win.focus();
@@ -435,10 +435,32 @@ ipcMain.on('drag-start', (e, paths) => {
   }
 });
 
+// Remember window position/size so the shortcut reopens it where the user left it.
+function windowStateFile() { return path.join(app.getPath('userData'), 'clipbay-window.json'); }
+function loadBounds() { try { return JSON.parse(fs.readFileSync(windowStateFile(), 'utf8')); } catch (_) { return null; } }
+let saveBoundsTimer = null;
+function saveBounds() {
+  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  try { fs.writeFileSync(windowStateFile(), JSON.stringify(win.getBounds())); } catch (_) {}
+}
+function scheduleSaveBounds() { if (saveBoundsTimer) clearTimeout(saveBoundsTimer); saveBoundsTimer = setTimeout(saveBounds, 500); }
+function boundsOnScreen(b) {
+  if (!b || b.x == null || b.y == null) return false;
+  return screen.getAllDisplays().some((d) => {
+    const a = d.workArea;
+    return b.x < a.x + a.width - 60 && b.x + (b.width || 0) > a.x + 60 &&
+           b.y < a.y + a.height - 40 && b.y + (b.height || 0) > a.y + 10;
+  });
+}
+
 function createWindow() {
+  const b = loadBounds();
+  const useB = boundsOnScreen(b);
   win = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: (b && b.width) || 1280,
+    height: (b && b.height) || 820,
+    x: useB ? b.x : undefined,
+    y: useB ? b.y : undefined,
     backgroundColor: '#0d0f14',
     title: 'ClipBay',
     webPreferences: {
@@ -449,6 +471,10 @@ function createWindow() {
   });
   win.removeMenu();
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  win.on('move', scheduleSaveBounds);
+  win.on('resize', scheduleSaveBounds);
+  win.on('close', saveBounds);
 
   // Auto-hide after a drag: only once focus is lost (drop landed in Premiere),
   // and only if at least 250ms passed since drag-start (never mid-drag).

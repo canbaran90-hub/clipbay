@@ -90,6 +90,7 @@ function measureCardHeight(cardW) {
     spriteCols: 5, spriteRows: 5, spriteCount: 25, src: '',
   };
   const sample = buildCard(sampleItem);
+  if (cardW < 150) sample.classList.add('compact');
   sample.style.position = 'absolute'; sample.style.visibility = 'hidden';
   sample.style.left = '-9999px'; sample.style.top = '0'; sample.style.width = cardW + 'px';
   gridInner.appendChild(sample);
@@ -126,6 +127,7 @@ function renderWindow() {
     const it = currentVisible[i];
     if (!it) continue;
     const card = buildCard(it);
+    if (cardW < 150) card.classList.add('compact');
     const row = Math.floor(i / cols), col = i % cols;
     card.style.position = 'absolute';
     card.style.width = cardW + 'px';
