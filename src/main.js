@@ -17,24 +17,9 @@ let clipsDir;
 let previewDir;
 let win;
 
-// Launcher behaviour: global shortcut toggles the window; after a drag-out the
-// window auto-hides so the user can keep editing in Premiere.
-// We never hide synchronously during a drag (that cancels it). Instead we "arm"
-// on drag-start and hide only once the window loses focus (= the drop landed in
-// another app), with a short delay so we never hide mid-drag.
-let dragArmed = false;
-let dragArmedAt = 0;
-let dragArmTimer = null;
-
-function armDragHide() {
-  dragArmed = true;
-  dragArmedAt = Date.now();
-  if (dragArmTimer) clearTimeout(dragArmTimer);
-  dragArmTimer = setTimeout(() => { dragArmed = false; }, 6000);
-}
-
+// Launcher behaviour: the global shortcut toggles the window. ClipBay stays open
+// while you work in Premiere; hide it manually with Ctrl+Alt+C or Esc.
 function showAndFocus() {
-  dragArmed = false;
   if (!win) return;
   if (win.isMinimized()) win.restore();
   // No centering: reappear where the user last left it (e.g. docked to one side).
@@ -459,8 +444,7 @@ ipcMain.on('drag-start', (e, paths) => {
   }
   const item = arr.length > 1 ? { files: arr, icon } : { file: arr[0], icon };
   try {
-    armDragHide();            // arm BEFORE the drag so the drop-time blur is caught
-    e.sender.startDrag(item); // do NOT hide here — that would cancel the drag
+    e.sender.startDrag(item); // ClipBay stays open after the drag
   } catch (err) {
     console.error('startDrag failed:', err.message);
   }
@@ -506,17 +490,6 @@ function createWindow() {
   win.on('move', scheduleSaveBounds);
   win.on('resize', scheduleSaveBounds);
   win.on('close', saveBounds);
-
-  // Auto-hide after a drag: only once focus is lost (drop landed in Premiere),
-  // and only if at least 250ms passed since drag-start (never mid-drag).
-  win.on('blur', () => {
-    if (dragArmed && Date.now() - dragArmedAt > 250) {
-      dragArmed = false;
-      if (dragArmTimer) clearTimeout(dragArmTimer);
-      win.hide();
-    }
-  });
-  win.on('focus', () => { dragArmed = false; });
 
   // Reload shortcuts handled in the main process, so they work even if the
   // renderer is busy: Ctrl/Cmd+R and F5 reload the window.
