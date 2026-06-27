@@ -145,6 +145,7 @@ button.primary:hover { filter: brightness(1.08); }
 }
 .card:hover { border-color: #3a455c; }
 .card.dragging { opacity: 0.5; }
+.card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
 
 .thumb {
   position: relative; aspect-ratio: 16 / 9; width: 100%; flex-shrink: 0;

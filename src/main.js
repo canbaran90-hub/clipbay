@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeImage, globalShortcut } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { Store } = require('./store');
@@ -12,6 +12,25 @@ let store;
 let cacheDir;
 let clipsDir;
 let win;
+
+// Launcher behaviour: global shortcut toggles the window; after a drag-out the
+// window auto-hides so the user can keep editing in Premiere.
+function showAndFocus() {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.center();
+  win.setAlwaysOnTop(true);
+  win.show();
+  win.focus();
+  win.setAlwaysOnTop(false);
+  send('focus-search');
+}
+
+function toggleWindow() {
+  if (!win) return;
+  if (win.isVisible() && win.isFocused()) win.hide();
+  else showAndFocus();
+}
 
 function typeForExt(ext) {
   ext = ext.toLowerCase();
@@ -210,6 +229,11 @@ ipcMain.handle('remove-folder', (e, folderId) => {
   return store.getFolders();
 });
 
+ipcMain.handle('remove-items', (e, paths) => {
+  (paths || []).forEach((p) => store.removeItem(p));
+  return true;
+});
+
 ipcMain.handle('toggle-favorite', (e, filePath) => {
   const item = store.getItem(filePath);
   if (!item) return null;
@@ -244,25 +268,38 @@ ipcMain.handle('export-clip', async (e, filePath, inPt, outPt) => {
   return outPath;
 });
 
-// OS-level drag of the REAL file -> drops straight into the Premiere project/timeline.
-ipcMain.on('drag-start', (e, filePath) => {
-  const thumbPath = cachePathFor(filePath, 'thumb.jpg');
+ipcMain.on('hide-window', () => { if (win) win.hide(); });
+
+// OS-level drag of the REAL file(s) -> drops straight into the Premiere project/timeline.
+ipcMain.on('drag-start', (e, paths) => {
+  const arr = (Array.isArray(paths) ? paths : [paths]).filter((p) => p && fs.existsSync(p));
+  if (!arr.length) return;
+
+  const thumbPath = cachePathFor(arr[0], 'thumb.jpg');
   let icon;
   try {
     icon = fs.existsSync(thumbPath)
-      ? nativeImage.createFromPath(thumbPath).resize({ width: 120 })
+      ? nativeImage.createFromPath(thumbPath).resize({ width: 140 })
       : nativeImage.createEmpty();
   } catch (err) {
     icon = nativeImage.createEmpty();
   }
   if (icon.isEmpty()) {
-    // startDrag requires a non-empty icon on most platforms; build a 1x1 fallback.
+    // startDrag requires a non-empty icon on most platforms; build a tiny fallback.
     icon = nativeImage.createFromBuffer(Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
       'base64'
     ));
   }
-  e.sender.startDrag({ file: filePath, icon });
+  const item = arr.length > 1 ? { files: arr, icon } : { file: arr[0], icon };
+  try {
+    // On Windows startDrag runs a modal loop and BLOCKS until the drop completes.
+    e.sender.startDrag(item);
+    // Drag finished -> auto-hide so the user lands back in Premiere.
+    if (process.platform === 'win32' && win && !win.isDestroyed()) win.hide();
+  } catch (err) {
+    console.error('startDrag failed:', err.message);
+  }
 });
 
 function createWindow() {
@@ -294,9 +331,17 @@ app.whenReady().then(async () => {
     if (!hasFfmpeg) send('ffmpeg-missing', true);
   });
 
+  // Global launcher hotkey: toggle ClipBay from anywhere (e.g. while in Premiere).
+  const reg = globalShortcut.register('CommandOrControl+Alt+C', toggleWindow);
+  if (!reg) console.error('Globaler Shortcut Ctrl+Alt+C konnte nicht registriert werden.');
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on('before-quit', () => {
