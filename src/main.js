@@ -61,6 +61,17 @@ function cachePathFor(filePath, name) {
   return path.join(dir, name);
 }
 
+// Grab the OS shell thumbnail (Windows Shell / macOS QuickLook) — this is the
+// exact preview Explorer shows, so with Icaros installed it covers ProRes/MOV
+// etc. without us spawning ffmpeg. Throws if the platform/file has none.
+async function makeShellThumb(filePath, outPath, size) {
+  const img = await nativeImage.createThumbnailFromPath(filePath, { width: size, height: size });
+  if (!img || img.isEmpty()) throw new Error('no shell thumbnail');
+  const s = img.getSize();
+  if (s.width < 64 || s.height < 36) throw new Error('shell thumbnail too small (generic icon)');
+  fs.writeFileSync(outPath, img.toJPEG(82));
+}
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -164,14 +175,16 @@ async function indexFile(filePath, folderId) {
   if (!unchanged) {
     try {
       if (type === 'video') {
-        // Only the cheap single-frame thumbnail at index time. The 25-frame
-        // hover-scrub sprite is built lazily on first hover (ensure-sprite),
-        // which keeps indexing of huge libraries fast.
-        await media.makeVideoThumb(filePath, thumbPath, meta.duration);
+        // Try the OS shell thumbnail first (Icaros) — no ffmpeg spawn, shared
+        // with Explorer's cache. Fall back to ffmpeg if unavailable.
+        // The 25-frame hover-scrub sprite stays lazy (built on first hover).
+        try { await makeShellThumb(filePath, thumbPath, 480); }
+        catch (_) { await media.makeVideoThumb(filePath, thumbPath, meta.duration); }
       } else if (type === 'audio') {
-        await media.makeAudioWave(filePath, thumbPath);
+        await media.makeAudioWave(filePath, thumbPath); // waveform, not a music icon
       } else if (type === 'image') {
-        await media.makeImageThumb(filePath, thumbPath);
+        try { await makeShellThumb(filePath, thumbPath, 480); }
+        catch (_) { await media.makeImageThumb(filePath, thumbPath); }
       }
     } catch (e) {
       // leave without thumb; UI shows placeholder
