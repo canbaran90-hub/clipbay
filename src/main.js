@@ -53,7 +53,8 @@ function ensureDir(dir) {
 // ---- indexing queue (bounded concurrency) ----
 const queue = [];
 let active = 0;
-const MAX_CONCURRENT = 3;
+let scanning = 0; // number of in-flight directory walks
+const MAX_CONCURRENT = 4;
 
 function enqueue(task) {
   queue.push(task);
@@ -68,7 +69,7 @@ function pump() {
       .catch((e) => console.error('index task failed:', e.message))
       .finally(() => {
         active--;
-        if (queue.length === 0 && active === 0) {
+        if (queue.length === 0 && active === 0 && scanning === 0) {
           send('index-progress', { done: true, remaining: 0 });
         } else {
           send('index-progress', { done: false, remaining: queue.length + active });
@@ -82,10 +83,12 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
-function walkDir(dir, out) {
+// Async, non-blocking recursive walk. Enqueues media files as it finds them and
+// yields to the event loop between directories so the UI never freezes.
+async function walkAndEnqueue(dir, folderId) {
   let entries;
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
   } catch (e) {
     return;
   }
@@ -93,10 +96,9 @@ function walkDir(dir, out) {
     if (e.name.startsWith('.')) continue;
     const full = path.join(dir, e.name);
     if (e.isDirectory()) {
-      walkDir(full, out);
-    } else if (e.isFile()) {
-      const ext = path.extname(e.name);
-      if (typeForExt(ext)) out.push(full);
+      await walkAndEnqueue(full, folderId);
+    } else if (e.isFile() && typeForExt(path.extname(e.name))) {
+      enqueue(() => indexFile(full, folderId));
     }
   }
 }
@@ -132,11 +134,10 @@ async function indexFile(filePath, folderId) {
   if (!unchanged) {
     try {
       if (type === 'video') {
+        // Only the cheap single-frame thumbnail at index time. The 25-frame
+        // hover-scrub sprite is built lazily on first hover (ensure-sprite),
+        // which keeps indexing of huge libraries fast.
         await media.makeVideoThumb(filePath, thumbPath, meta.duration);
-        media.makeVideoSprite(filePath, spritePath, meta.duration).then(() => {
-          const it = store.patchItem(filePath, { spriteReady: true });
-          if (it) send('item-updated', publicItem(it));
-        }).catch(() => {});
       } else if (type === 'audio') {
         await media.makeAudioWave(filePath, thumbPath);
       } else if (type === 'image') {
@@ -193,14 +194,56 @@ function fileUrl(p) {
   return 'file:///' + p.replace(/\\/g, '/').replace(/ /g, '%20').replace(/#/g, '%23');
 }
 
-function scanFolder(folder) {
-  const files = [];
-  walkDir(folder.path, files);
-  send('index-progress', { done: false, remaining: files.length });
-  for (const f of files) {
-    enqueue(() => indexFile(f, folder.id));
+async function scanFolder(folder) {
+  scanning++;
+  send('index-progress', { done: false, remaining: queue.length + active + 1 });
+  try {
+    await walkAndEnqueue(folder.path, folder.id);
+  } finally {
+    scanning--;
+    if (queue.length === 0 && active === 0 && scanning === 0) {
+      send('index-progress', { done: true, remaining: 0 });
+    }
   }
-  if (files.length === 0) send('index-progress', { done: true, remaining: 0 });
+}
+
+// ---- live file watching (keeps ClipBay in sync with Explorer) ----
+const watchers = new Map();        // folderId -> FSWatcher
+const watchDebounce = new Map();   // fullPath -> timer
+
+function handleFsEvent(folder, filename) {
+  if (!filename) return;
+  const full = path.join(folder.path, filename);
+  if (watchDebounce.has(full)) clearTimeout(watchDebounce.get(full));
+  watchDebounce.set(full, setTimeout(() => {
+    watchDebounce.delete(full);
+    fs.stat(full, (err, st) => {
+      if (err) {
+        // deleted or moved away -> drop it from ClipBay
+        if (store.getItem(full)) { store.removeItem(full); send('item-removed', full); }
+        return;
+      }
+      if (st.isFile() && typeForExt(path.extname(full))) {
+        enqueue(() => indexFile(full, folder.id));   // new/changed -> (re)index
+      }
+    });
+  }, 400));
+}
+
+function startWatching(folder) {
+  if (watchers.has(folder.id)) return;
+  try {
+    const w = fs.watch(folder.path, { recursive: true }, (evt, filename) => handleFsEvent(folder, filename));
+    w.on('error', () => {});
+    watchers.set(folder.id, w);
+  } catch (e) {
+    console.error('watch failed for', folder.path, e.message);
+  }
+}
+
+function stopWatching(folderId) {
+  const w = watchers.get(folderId);
+  if (w) { try { w.close(); } catch (_) {} watchers.delete(folderId); }
 }
 
 // ---------------- IPC ----------------
@@ -219,6 +262,7 @@ ipcMain.handle('add-folder', async () => {
     const folder = store.addFolder(dir);
     added.push(folder);
     scanFolder(folder);
+    startWatching(folder);
   }
   return added;
 });
@@ -243,11 +287,13 @@ ipcMain.handle('add-folders-by-path', (e, paths) => {
     const folder = store.addFolder(dir);
     added.push(folder);
     scanFolder(folder);
+    startWatching(folder);
   }
   return added;
 });
 
 ipcMain.handle('remove-folder', (e, folderId) => {
+  stopWatching(folderId);
   store.removeFolder(folderId);
   return store.getFolders();
 });
@@ -278,6 +324,8 @@ ipcMain.handle('reveal', (e, filePath) => {
   shell.showItemInFolder(filePath);
 });
 
+ipcMain.handle('open-path', (e, p) => shell.openPath(p));
+
 ipcMain.handle('export-clip', async (e, filePath, inPt, outPt) => {
   const item = store.getItem(filePath);
   const isVideo = item ? item.type === 'video' : true;
@@ -297,6 +345,24 @@ ipcMain.handle('export-clip', async (e, filePath, inPt, outPt) => {
   const outPath = path.join(clipsDir, `${base}_${stamp}${ext}`);
   await media.exportClip(filePath, inPt, dur, outPath, mode);
   return outPath;
+});
+
+// Build (and cache) the hover-scrub sprite on demand (first hover).
+ipcMain.handle('ensure-sprite', async (e, filePath) => {
+  const item = store.getItem(filePath);
+  if (!item || item.type !== 'video') return null;
+  const spritePath = cachePathFor(filePath, 'sprite.jpg');
+  try {
+    if (!fs.existsSync(spritePath)) {
+      ensureDir(path.dirname(spritePath));
+      const dur = item.duration || (await media.probe(filePath)).duration;
+      await media.makeVideoSprite(filePath, spritePath, dur);
+    }
+    if (!item.spriteReady) store.patchItem(filePath, { spriteReady: true });
+    return fileUrl(spritePath);
+  } catch (err) {
+    return null;
+  }
 });
 
 // Build (and cache) an H.264 proxy for sources the browser can't play (ProRes/alpha/MXF…).
@@ -355,6 +421,17 @@ function createWindow() {
   });
   win.removeMenu();
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // Reload shortcuts handled in the main process, so they work even if the
+  // renderer is busy: Ctrl/Cmd+R and F5 reload the window.
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    const k = (input.key || '').toLowerCase();
+    if (k === 'f5' || ((input.control || input.meta) && k === 'r')) {
+      event.preventDefault();
+      win.webContents.reload();
+    }
+  });
 }
 
 // Only allow one ClipBay instance — a second launch just focuses the running one.
@@ -378,8 +455,8 @@ if (!gotTheLock) {
     createWindow();
     win.webContents.once('did-finish-load', () => {
       if (!hasFfmpeg) send('ffmpeg-missing', true);
-      // Auto-refresh on launch: picks up new files and regenerates missing previews.
-      for (const f of store.getFolders()) scanFolder(f);
+      // Auto-refresh on launch + keep watching for Explorer changes.
+      for (const f of store.getFolders()) { scanFolder(f); startWatching(f); }
     });
 
     // Global launcher hotkey: toggle ClipBay from anywhere (e.g. while in Premiere).

@@ -222,6 +222,20 @@ button.primary:hover { filter: brightness(1.08); }
 }
 .drop-card .drop-ico { font-size: 46px; margin-bottom: 14px; }
 
+/* ---------- Context menu ---------- */
+.ctx-menu {
+  position: fixed; z-index: 300; min-width: 200px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 6px; box-shadow: 0 16px 44px rgba(0,0,0,0.55);
+}
+.ctx-item {
+  padding: 8px 12px; border-radius: 7px; font-size: 13px; color: var(--text); cursor: pointer;
+  white-space: nowrap;
+}
+.ctx-item:hover { background: var(--accent); color: #06101f; }
+.ctx-item.danger:hover { background: #c0392b; color: #fff; }
+.ctx-sep { height: 1px; background: var(--line); margin: 5px 4px; }
+
 /* ---------- Size slider ---------- */
 .size-control { display: flex; align-items: center; gap: 8px; color: var(--dim); }
 .size-control .size-ico { font-size: 13px; }

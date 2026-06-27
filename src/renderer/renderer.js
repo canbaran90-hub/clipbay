@@ -173,14 +173,23 @@ function buildColorDots(it) {
 
 // ---------------- grid hover scrubbing ----------------
 function wireThumbInteraction(thumb, scrubLine, it) {
-  if (it.type === 'video' && it.sprite) {
+  if (it.type === 'video') {
     const cols = it.spriteCols, rows = it.spriteRows, count = it.spriteCount;
-    thumb.addEventListener('mouseenter', () => {
-      thumb.style.backgroundImage = `url("${it.sprite}")`;
+    let sprite = it.sprite;   // may be null until built lazily
+    let requesting = false;
+    thumb.addEventListener('mouseenter', async () => {
+      if (!sprite && !requesting) {
+        requesting = true;
+        try { const url = await window.api.ensureSprite(it.path); if (url) sprite = url; } catch (_) {}
+        requesting = false;
+      }
+      if (!sprite) return;
+      thumb.style.backgroundImage = `url("${sprite}")`;
       thumb.style.backgroundSize = `${cols * 100}% ${rows * 100}%`;
       scrubLine.style.display = 'block';
     });
     thumb.addEventListener('mousemove', (e) => {
+      if (!sprite) return;
       const rect = thumb.getBoundingClientRect();
       const ratio = clamp((e.clientX - rect.left) / rect.width, 0, 0.999);
       const idx = Math.min(count - 1, Math.floor(ratio * count));
@@ -248,6 +257,30 @@ function selectAllVisible() {
 }
 function clearSelection() { state.selection.clear(); applySelectionClasses(); }
 
+// ---------------- context menu ----------------
+let ctxEl = null;
+function hideContextMenu() { if (ctxEl) { ctxEl.remove(); ctxEl = null; } }
+function showContextMenu(x, y, items) {
+  hideContextMenu();
+  ctxEl = document.createElement('div');
+  ctxEl.className = 'ctx-menu';
+  for (const it of items) {
+    if (it.sep) { const s = document.createElement('div'); s.className = 'ctx-sep'; ctxEl.appendChild(s); continue; }
+    const row = document.createElement('div');
+    row.className = 'ctx-item' + (it.danger ? ' danger' : '');
+    row.textContent = it.label;
+    row.addEventListener('click', () => { hideContextMenu(); it.action(); });
+    ctxEl.appendChild(row);
+  }
+  document.body.appendChild(ctxEl);
+  const r = ctxEl.getBoundingClientRect();
+  ctxEl.style.left = Math.min(x, window.innerWidth - r.width - 6) + 'px';
+  ctxEl.style.top = Math.min(y, window.innerHeight - r.height - 6) + 'px';
+}
+window.addEventListener('click', hideContextMenu);
+window.addEventListener('blur', hideContextMenu);
+window.addEventListener('scroll', hideContextMenu, true);
+
 function wireCardSelection(card, thumb, it) {
   card.addEventListener('click', (e) => {
     if (e.ctrlKey || e.metaKey) toggleSelect(it.path);
@@ -255,6 +288,17 @@ function wireCardSelection(card, thumb, it) {
     else selectOnly(it.path);
   });
   thumb.addEventListener('dblclick', () => openViewer(it));
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (!state.selection.has(it.path)) selectOnly(it.path);
+    const n = state.selection.size;
+    showContextMenu(e.clientX, e.clientY, [
+      { label: 'Im Explorer anzeigen', action: () => window.api.reveal(it.path) },
+      { label: 'Im Vorschaufenster öffnen', action: () => openViewer(it) },
+      { sep: true },
+      { label: n > 1 ? `${n} aus ClipBay entfernen` : 'Aus ClipBay entfernen', danger: true, action: () => deleteSelected() },
+    ]);
+  });
   thumb.addEventListener('dragstart', (e) => {
     e.preventDefault();
     if (!state.selection.has(it.path)) selectOnly(it.path);
@@ -364,6 +408,26 @@ function renderTreeNode(node, depth, isRoot) {
   }
 
   li.addEventListener('click', () => { state.dirFilter = node.path; renderFolders(); render(); });
+  li.addEventListener('contextmenu', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const items = [
+      { label: 'Im Explorer öffnen', action: () => window.api.openPath(node.path) },
+      { label: 'Nur diesen Ordner zeigen', action: () => { state.dirFilter = node.path; renderFolders(); render(); } },
+    ];
+    if (isRoot) {
+      items.push({ sep: true }, {
+        label: 'Ordner aus ClipBay entfernen', danger: true, action: async () => {
+          if (!confirm(`Ordner aus ClipBay entfernen?\n\n${node.path}\n\nDeine Dateien auf der Festplatte bleiben unberührt.`)) return;
+          if (state.dirFilter && (state.dirFilter === node.path || state.dirFilter.startsWith(node.path + '/'))) state.dirFilter = null;
+          setBusy(true, 'Ordner wird entfernt…');
+          await window.api.removeFolder(node.folderId);
+          await reloadState();
+          setBusy(false, 'Bereit');
+        },
+      });
+    }
+    showContextMenu(e.clientX, e.clientY, items);
+  });
   folderListEl.appendChild(li);
 
   if (hasChildren && expanded) {
@@ -409,11 +473,21 @@ function setBusy(busy, text) {
 }
 
 window.api.onItemUpdated((item) => { state.items.set(item.path, item); scheduleRender(); });
-let renderQueued = false;
+window.api.onItemRemoved((p) => { if (state.items.delete(p)) { state.selection.delete(p); scheduleRender(); } });
+
+// Throttle re-renders (max ~every 400ms) so big libraries indexing thousands of
+// files stay responsive instead of rebuilding the grid every frame.
+let lastRender = 0, renderTimer = null;
 function scheduleRender() {
-  if (renderQueued) return;
-  renderQueued = true;
-  requestAnimationFrame(() => { renderQueued = false; render(); });
+  if (renderTimer) return;
+  const since = performance.now() - lastRender;
+  const delay = since > 400 ? 0 : 400 - since;
+  renderTimer = setTimeout(() => {
+    renderTimer = null;
+    lastRender = performance.now();
+    render();
+    renderFolders(); // keep the folder tree in sync with new/removed files
+  }, delay);
 }
 window.api.onIndexProgress((p) => {
   if (p.done) setBusy(false, 'Bereit');
@@ -460,24 +534,28 @@ sizeSlider.addEventListener('input', (e) => {
 
 // ---------------- drop folders into ClipBay ----------------
 const dropZone = document.getElementById('dropZone');
-let dropDepth = 0;
+let dropHideTimer = null;
 function dragHasFiles(e) { return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files'); }
-window.addEventListener('dragenter', (e) => {
-  if (!dragHasFiles(e)) return;
-  e.preventDefault(); dropDepth++; dropZone.classList.remove('hidden');
-});
+function showDrop() {
+  dropZone.classList.remove('hidden');
+  if (dropHideTimer) clearTimeout(dropHideTimer);
+  dropHideTimer = setTimeout(hideDrop, 160); // self-heals if the drag ends off-window
+}
+function hideDrop() {
+  if (dropHideTimer) { clearTimeout(dropHideTimer); dropHideTimer = null; }
+  dropZone.classList.add('hidden');
+}
+// dragover fires continuously while over the window; the timer keeps it shown and
+// auto-hides shortly after the cursor leaves or the drag is cancelled.
 window.addEventListener('dragover', (e) => {
   if (!dragHasFiles(e)) return;
-  e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+  e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; showDrop();
 });
-window.addEventListener('dragleave', (e) => {
-  if (!dragHasFiles(e)) return;
-  dropDepth--; if (dropDepth <= 0) { dropDepth = 0; dropZone.classList.add('hidden'); }
-});
+window.addEventListener('dragend', hideDrop);
 window.addEventListener('drop', async (e) => {
+  hideDrop();
   if (!dragHasFiles(e)) return;
   e.preventDefault();
-  dropDepth = 0; dropZone.classList.add('hidden');
   const paths = [...e.dataTransfer.files].map((f) => window.api.getPathForFile(f)).filter(Boolean);
   if (!paths.length) return;
   setBusy(true, 'Ordner werden hinzugefügt…');
@@ -492,6 +570,7 @@ document.addEventListener('keydown', (e) => {
   if (!overlay.classList.contains('hidden')) return; // viewer handles its own keys
   const typing = document.activeElement && document.activeElement.tagName === 'INPUT';
   if (e.key === 'Escape') {
+    if (ctxEl) { hideContextMenu(); return; }
     if (typing) { document.activeElement.blur(); return; }
     if (state.selection.size) clearSelection();
     else window.api.hideWindow();
