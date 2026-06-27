@@ -1,0 +1,14 @@
+{
+  "name": "clipbay",
+  "version": "0.1.0",
+  "description": "Schneller Media-Asset-Browser fuer Premiere Pro: Ordner in-place indexieren, Video-Hover-Scrub, Audio-Waveform, Favoriten, Drag-and-Drop in die Timeline.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

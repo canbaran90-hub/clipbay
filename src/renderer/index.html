@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; media-src 'self' file:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>ClipBay</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="brand">ClipBay</div>
+
+      <button id="addFolderBtn" class="primary">+ Ordner hinzufügen</button>
+
+      <nav class="filters">
+        <div class="nav-section">Ansicht</div>
+        <button class="filter active" data-filter="all">Alle</button>
+        <button class="filter" data-filter="favorite">★ Favoriten</button>
+        <button class="filter" data-filter="video">Video</button>
+        <button class="filter" data-filter="audio">Audio</button>
+        <button class="filter" data-filter="image">Bilder</button>
+      </nav>
+
+      <div class="nav-section">Farben</div>
+      <div id="colorFilter" class="color-filter"></div>
+
+      <div class="nav-section folders-head">
+        <span>Ordner</span>
+        <button id="rescanBtn" title="Neu scannen">⟳</button>
+      </div>
+      <ul id="folderList"></ul>
+    </aside>
+
+    <main id="main">
+      <header id="topbar">
+        <input id="search" type="text" placeholder="Suchen… (Name, Ordner, Tag)" />
+        <div id="count" class="count"></div>
+      </header>
+
+      <div id="grid" class="grid"></div>
+      <div id="empty" class="empty hidden">
+        <p>Noch keine Assets.</p>
+        <p class="dim">Klicke „Ordner hinzufügen" und wähle deinen SFX-/Footage-Ordner.</p>
+      </div>
+    </main>
+  </div>
+
+  <footer id="statusbar">
+    <span id="status">Bereit</span>
+    <span id="dragHint" class="dim">Tipp: Karte in die Premiere-Timeline ziehen</span>
+  </footer>
+
+  <audio id="audioEl"></audio>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
