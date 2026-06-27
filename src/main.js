@@ -228,6 +228,25 @@ ipcMain.handle('rescan', async () => {
   return true;
 });
 
+// Folders dropped onto the window from Explorer. Directories are added directly;
+// dropped files add their containing folder.
+ipcMain.handle('add-folders-by-path', (e, paths) => {
+  const dirs = new Set();
+  for (const p of (paths || [])) {
+    try {
+      const st = fs.statSync(p);
+      dirs.add(st.isDirectory() ? p : path.dirname(p));
+    } catch (_) { /* skip unreadable */ }
+  }
+  const added = [];
+  for (const dir of dirs) {
+    const folder = store.addFolder(dir);
+    added.push(folder);
+    scanFolder(folder);
+  }
+  return added;
+});
+
 ipcMain.handle('remove-folder', (e, folderId) => {
   store.removeFolder(folderId);
   return store.getFolders();

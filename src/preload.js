@@ -1,8 +1,16 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+
+// Resolve the absolute path of a dropped File (File.path is removed in newer Electron).
+function pathForFile(file) {
+  try { if (webUtils && webUtils.getPathForFile) return webUtils.getPathForFile(file); } catch (_) {}
+  return file && file.path ? file.path : null;
+}
 
 contextBridge.exposeInMainWorld('api', {
   getState: () => ipcRenderer.invoke('get-state'),
   addFolder: () => ipcRenderer.invoke('add-folder'),
+  addFoldersByPath: (paths) => ipcRenderer.invoke('add-folders-by-path', paths),
+  getPathForFile: (file) => pathForFile(file),
   removeFolder: (id) => ipcRenderer.invoke('remove-folder', id),
   removeItems: (paths) => ipcRenderer.invoke('remove-items', paths),
   rescan: () => ipcRenderer.invoke('rescan'),

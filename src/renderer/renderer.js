@@ -458,6 +458,35 @@ sizeSlider.addEventListener('input', (e) => {
   applyCardSize(px);
 })();
 
+// ---------------- drop folders into ClipBay ----------------
+const dropZone = document.getElementById('dropZone');
+let dropDepth = 0;
+function dragHasFiles(e) { return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files'); }
+window.addEventListener('dragenter', (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault(); dropDepth++; dropZone.classList.remove('hidden');
+});
+window.addEventListener('dragover', (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+});
+window.addEventListener('dragleave', (e) => {
+  if (!dragHasFiles(e)) return;
+  dropDepth--; if (dropDepth <= 0) { dropDepth = 0; dropZone.classList.add('hidden'); }
+});
+window.addEventListener('drop', async (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  dropDepth = 0; dropZone.classList.add('hidden');
+  const paths = [...e.dataTransfer.files].map((f) => window.api.getPathForFile(f)).filter(Boolean);
+  if (!paths.length) return;
+  setBusy(true, 'Ordner werden hinzugefügt…');
+  await window.api.addFoldersByPath(paths);
+  state.folders = (await window.api.getState()).folders;
+  for (const f of state.folders) state.expandedDirs.add(norm(f.path));
+  renderFolders();
+});
+
 // ---------------- global grid shortcuts ----------------
 document.addEventListener('keydown', (e) => {
   if (!overlay.classList.contains('hidden')) return; // viewer handles its own keys
